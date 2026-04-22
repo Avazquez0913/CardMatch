@@ -1,3 +1,6 @@
+// Load environment variables before anything else
+require('dotenv').config();
+
 // CardMatch Backend Server
 // This is the main Express app that handles API requests
 // Routes: GET /api/cards (list all), GET /api/cards/:id (detail), POST /api/cards/recommend (get recommendations)

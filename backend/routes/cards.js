@@ -1,42 +1,51 @@
-// Card Routes
-// Handles GET /api/cards (list), GET /api/cards/:id (detail), POST /api/cards/recommend (recommendations)
+/**
+ * @file cards.js
+ * @description Express routes for the cards resource.
+ * Handles GET /api/cards (list), GET /api/cards/:id (detail),
+ * and POST /api/cards/recommend (recommendations).
+ */
 
-const express = require("express");
-const router = express.Router();
+const express = require('express');
+const router  = express.Router();
 
-// Load card data from JSON file
-const cards = require("../../data/cards.json");
-// Import the recommendation logic
-const { recommendCards } = require("../services/rewardsService");
-// Import Joi validation middleware
-const { validateRecommendRequest } = require("../middleware/validateRecommendRequest");
+const dataStore            = require('../services/dataStore');
+const { recommendCards }   = require('../services/rewardsService');
+const { validateRecommendRequest } = require('../middleware/validateRecommendRequest');
 
-// GET /api/cards – return all cards
-router.get("/", (req, res) => {
-  res.json(cards);
+// GET /api/cards — return all cards
+router.get('/', (req, res) => {
+  res.json(dataStore.getAllCards());
 });
 
-// GET /api/cards/:id – return a specific card by ID
-router.get("/:id", (req, res) => {
-  // Find card with matching ID
-  const card = cards.find((c) => c.id === parseInt(req.params.id));
-  if (!card) return res.status(404).json({ error: "Card not found" });
+// GET /api/cards/:id — return a specific card by ID
+router.get('/:id', (req, res) => {
+  const card = dataStore.getCardById(req.params.id);
+  if (!card) return res.status(404).json({ error: 'Card not found' });
   res.json(card);
 });
 
-// POST /api/cards/recommend – compute recommendations
-router.post("/recommend", validateRecommendRequest, (req, res) => {
+// POST /api/cards/recommend — compute and return recommendations
+router.post('/recommend', validateRecommendRequest, (req, res) => {
   try {
-    // Extract data from request body (already validated by middleware)
+    const startMs = Date.now();
     const { profile, spending, ownedCards = [] } = req.body;
 
-    // Call the recommendation service
+    const cards  = dataStore.getAllCards();
     const result = recommendCards(cards, profile, spending, ownedCards);
-    // Send back the results
+
+    // Fire-and-forget: log the recommendation without blocking the response
+    dataStore.logRecommendation({
+      sessionId:  req.headers['x-session-id'] || null,
+      profile,
+      spending,
+      results:    result,
+      durationMs: Date.now() - startMs,
+    });
+
     res.json(result);
   } catch (err) {
-    console.error("Recommend API error:", err);
-    res.status(500).json({ error: "Recommendation server error" });
+    console.error('Recommend API error:', err);
+    res.status(500).json({ error: 'Recommendation server error' });
   }
 });
 
