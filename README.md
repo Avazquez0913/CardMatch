@@ -1,5 +1,7 @@
 # CardMatch — Credit Card Recommendation Engine
 
+![Tests](https://github.com/avazquezmaldonado/CardMatch/actions/workflows/test.yml/badge.svg)
+
 CardMatch is a capstone project (CSCI 4208) — a web application that recommends credit cards based on a user's spending profile, credit score, and preferences.
 
 ## Overview

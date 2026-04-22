@@ -24,7 +24,11 @@ app.get('/', (req, res) => {
   res.json({ message: 'CardMatch backend running' });
 });
 
-// Start the server
-app.listen(PORT, () => {
-  console.log(`CardMatch backend listening on port ${PORT}`);
-});
+// Start the server only when this file is run directly (not when required by tests)
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`CardMatch backend listening on port ${PORT}`);
+  });
+}
+
+module.exports = app;
