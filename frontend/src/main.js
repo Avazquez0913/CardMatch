@@ -261,14 +261,61 @@ function renderResults(data) {
   }
   cardsHtml += '</div>';
   
+  // Build explanation section if present
+  let explanationHtml = '';
+  if (data.explanation) {
+    const ex = data.explanation;
+
+    // Excluded cards list
+    let excludedHtml = '';
+    if (ex.excluded_cards && ex.excluded_cards.length > 0) {
+      excludedHtml = ex.excluded_cards
+        .map(c => `<li><strong>${c.name}</strong> — ${c.reason}</li>`)
+        .join('');
+    }
+
+    // Profile signals
+    const signals = ex.profile_signals || {};
+    const dominant = signals.dominant_category
+      ? `<span class="inline-block bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded mr-2">Top spending: <strong>${signals.dominant_category}</strong></span>`
+      : '';
+    const ecosBonus = signals.ecosystem_bonus_applied
+      ? `<span class="inline-block bg-green-100 text-green-800 text-xs px-2 py-1 rounded">Ecosystem bonus applied ✓</span>`
+      : '';
+
+    explanationHtml = `
+      <div class="mt-6 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+        <h3 class="font-semibold text-lg mb-3">Why These Cards?</h3>
+
+        <div class="mb-3 p-3 bg-white border border-gray-100 rounded text-sm text-gray-700">
+          ${ex.top_card_reasoning || ''}
+        </div>
+
+        <div class="mb-3">${dominant}${ecosBonus}</div>
+
+        ${excludedHtml ? `
+          <details class="mt-2">
+            <summary class="cursor-pointer text-sm text-gray-500 hover:text-gray-700">
+              ${ex.excluded_cards.length} card(s) not shown — click to see why
+            </summary>
+            <ul class="mt-2 ml-4 list-disc text-sm text-gray-600 space-y-1">${excludedHtml}</ul>
+          </details>
+        ` : ''}
+
+        <div class="mt-3 text-xs text-gray-400">Algorithm ${ex.algo_version}</div>
+      </div>
+    `;
+  }
+
   // Show the results in the page
   el.innerHTML = `
     <div class="p-4 bg-white rounded shadow">
       <h3 class="font-semibold text-lg mb-2">Best by Category</h3>
       <ul class="list-disc ml-5 mb-4">${byCatHtml || '<li>No recommendations</li>'}</ul>
-      
+
       <h3 class="font-semibold text-lg mb-4">Top 3 Recommended Cards</h3>
       ${cardsHtml}
+      ${explanationHtml}
     </div>
   `;
 }
