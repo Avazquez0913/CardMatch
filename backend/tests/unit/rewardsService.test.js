@@ -9,6 +9,8 @@ const {
   isEligible,
   estimateRewardsForCard,
   recommendCards,
+  getExclusionReason,
+  ALGO_VERSION,
 } = require('../../services/rewardsService');
 
 // ---------------------------------------------------------------------------
@@ -295,5 +297,141 @@ describe('recommendCards — category winner selection', () => {
     const scored = result.scored.find((c) => c.id === chaseCard.id);
     expect(scored).toBeDefined();
     expect(scored.owned).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ALGO_VERSION constant
+// ---------------------------------------------------------------------------
+
+describe('ALGO_VERSION', () => {
+  test('is exported as a non-empty string', () => {
+    expect(typeof ALGO_VERSION).toBe('string');
+    expect(ALGO_VERSION.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getExclusionReason — per-rule reason strings
+// ---------------------------------------------------------------------------
+
+describe('getExclusionReason — 5/24 rule', () => {
+  test('returns a reason string when Chase card is blocked by 5/24', () => {
+    const reason = getExclusionReason(chaseCard, { creditScore: 750, accountsOpened24: 5 });
+    expect(typeof reason).toBe('string');
+    expect(reason).toMatch(/5\/24|accounts/i);
+  });
+
+  test('returns null for Chase card when accountsOpened24 is 4', () => {
+    const reason = getExclusionReason(chaseCard, { creditScore: 750, accountsOpened24: 4 });
+    expect(reason).toBeNull();
+  });
+
+  test('returns null for non-Chase card even with 5+ accounts', () => {
+    const reason = getExclusionReason(studentCard, { creditScore: 750, accountsOpened24: 6 });
+    expect(reason).toBeNull();
+  });
+});
+
+describe('getExclusionReason — credit score cutoff', () => {
+  test('returns a reason string when score is below card minimum', () => {
+    const reason = getExclusionReason(premiumCard, { creditScore: 680, accountsOpened24: 0 });
+    expect(typeof reason).toBe('string');
+    expect(reason).toMatch(/credit score|minimum|720/i);
+  });
+
+  test('returns a reason string when premium card blocked in mid-range band', () => {
+    const reason = getExclusionReason(chaseCard, { creditScore: 650, accountsOpened24: 0 });
+    expect(typeof reason).toBe('string');
+    expect(reason).toMatch(/premium|credit score/i);
+  });
+
+  test('returns a reason when score is too low for non-beginner card', () => {
+    // cashBackCard is Mid level — blocked below 630
+    const reason = getExclusionReason(cashBackCard, { creditScore: 600, accountsOpened24: 0 });
+    expect(typeof reason).toBe('string');
+  });
+
+  test('returns null when card is eligible', () => {
+    const reason = getExclusionReason(chaseCard, { creditScore: 750, accountsOpened24: 2 });
+    expect(reason).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// recommendCards — explanation field
+// ---------------------------------------------------------------------------
+
+describe('recommendCards — explanation field', () => {
+  const profile = {
+    creditScore: 750,
+    accountsOpened24: 2,
+    isStudent: false,
+    preferredEcosystem: 'Chase',
+    travelFrequency: 'Often',
+    rewardPreference: 'Points/Miles',
+  };
+
+  test('result includes an explanation object', () => {
+    const result = recommendCards(ALL_CARDS, profile, STD_SPENDING, []);
+    expect(result).toHaveProperty('explanation');
+    expect(typeof result.explanation).toBe('object');
+  });
+
+  test('explanation.algo_version matches ALGO_VERSION constant', () => {
+    const result = recommendCards(ALL_CARDS, profile, STD_SPENDING, []);
+    expect(result.explanation.algo_version).toBe(ALGO_VERSION);
+  });
+
+  test('explanation.top_card_reasoning is a non-empty string', () => {
+    const result = recommendCards(ALL_CARDS, profile, STD_SPENDING, []);
+    expect(typeof result.explanation.top_card_reasoning).toBe('string');
+    expect(result.explanation.top_card_reasoning.length).toBeGreaterThan(0);
+  });
+
+  test('explanation.top_card_reasoning mentions the top card name', () => {
+    const result = recommendCards(ALL_CARDS, profile, STD_SPENDING, []);
+    const topName = result.bestOverall[0].name;
+    expect(result.explanation.top_card_reasoning).toContain(topName);
+  });
+
+  test('explanation.excluded_cards is an array', () => {
+    const result = recommendCards(ALL_CARDS, profile, STD_SPENDING, []);
+    expect(Array.isArray(result.explanation.excluded_cards)).toBe(true);
+  });
+
+  test('explanation.excluded_cards contains cards that did not appear in scored', () => {
+    // Use a low-score profile so some cards are definitely excluded
+    const lowProfile = { creditScore: 610, accountsOpened24: 0, isStudent: false, travelFrequency: 'Never', rewardPreference: 'Either' };
+    const result = recommendCards(ALL_CARDS, lowProfile, STD_SPENDING, []);
+    expect(result.explanation.excluded_cards.length).toBeGreaterThan(0);
+  });
+
+  test('each excluded card entry has name and reason fields', () => {
+    const lowProfile = { creditScore: 610, accountsOpened24: 0, isStudent: false, travelFrequency: 'Never', rewardPreference: 'Either' };
+    const result = recommendCards(ALL_CARDS, lowProfile, STD_SPENDING, []);
+    for (const entry of result.explanation.excluded_cards) {
+      expect(typeof entry.name).toBe('string');
+      expect(typeof entry.reason).toBe('string');
+      expect(entry.reason.length).toBeGreaterThan(0);
+    }
+  });
+
+  test('explanation.profile_signals.dominant_category is the highest-spend category', () => {
+    // STD_SPENDING: groceries=400, dining=200, travel=150, other=100 → dominant is groceries
+    const result = recommendCards(ALL_CARDS, profile, STD_SPENDING, []);
+    expect(result.explanation.profile_signals.dominant_category).toBe('groceries');
+  });
+
+  test('explanation.profile_signals.ecosystem_bonus_applied is true when ecosystem matched', () => {
+    // profile.preferredEcosystem = 'Chase' and chaseCard is in ALL_CARDS and eligible
+    const result = recommendCards(ALL_CARDS, profile, STD_SPENDING, []);
+    expect(result.explanation.profile_signals.ecosystem_bonus_applied).toBe(true);
+  });
+
+  test('explanation.profile_signals.ecosystem_bonus_applied is false when no match', () => {
+    const noMatchProfile = { ...profile, preferredEcosystem: 'Any' };
+    const result = recommendCards(ALL_CARDS, noMatchProfile, STD_SPENDING, []);
+    expect(result.explanation.profile_signals.ecosystem_bonus_applied).toBe(false);
   });
 });

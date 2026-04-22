@@ -8,6 +8,94 @@
   5. Returns top recommendations with explanations
 */
 
+/** Version string incremented whenever the scoring logic changes. */
+const ALGO_VERSION = 'v1.0';
+
+/** Chase 5/24 limit: blocked if this many accounts opened in 24 months. */
+const CHASE_524_LIMIT = 5;
+
+/**
+ * Returns the human-readable reason a card is ineligible for the given profile,
+ * or null if the card is eligible. Mirrors the logic in isEligible exactly so
+ * the two functions never diverge.
+ *
+ * @param {object} card    - Card object from the catalog.
+ * @param {object} profile - User profile from the request.
+ * @returns {string|null}  Reason string, or null if eligible.
+ */
+function getExclusionReason(card, profile) {
+  if (!card.minCreditScore) return null;
+  if (!profile || typeof profile.creditScore !== 'number') return null;
+
+  if (profile.accountsOpened24 >= CHASE_524_LIMIT &&
+      String(card.issuer).toLowerCase() === 'chase') {
+    return `5/24 rule: ${profile.accountsOpened24} accounts opened in 24 months`;
+  }
+
+  const level = (card.level || '').toLowerCase();
+
+  if (profile.creditScore < 630) {
+    if (!(card.secured || level === 'beginner' || level === 'student')) {
+      return `Credit score ${profile.creditScore} too low for ${level || 'mid'}-level cards (minimum 630)`;
+    }
+  }
+
+  if (profile.creditScore >= 630 && profile.creditScore < 680) {
+    if (level === 'premium') {
+      return `Credit score ${profile.creditScore} below 680 required for premium cards`;
+    }
+  }
+
+  if (profile.creditScore < card.minCreditScore) {
+    return `Credit score ${profile.creditScore} below minimum requirement of ${card.minCreditScore}`;
+  }
+
+  return null;
+}
+
+/**
+ * Returns the spending category with the highest monthly spend.
+ *
+ * @param {object} spending - Map of category → monthly spend amount.
+ * @returns {string} The dominant category name.
+ */
+function getDominantCategory(spending) {
+  let top = null;
+  let max = -Infinity;
+  for (const [cat, amount] of Object.entries(spending || {})) {
+    if (amount > max) { max = amount; top = cat; }
+  }
+  return top;
+}
+
+/**
+ * Builds the top_card_reasoning template string for the #1 ranked card.
+ *
+ * @param {object} topCard     - The highest-ranked scored card object.
+ * @param {object} rawCard     - The raw catalog card (for reward rates and fee).
+ * @param {string} dominantCat - The user's dominant spending category.
+ * @param {object} spending    - The user's spending breakdown.
+ * @returns {string} Human-readable reasoning sentence.
+ */
+function buildTopCardReasoning(topCard, rawCard, dominantCat, spending) {
+  const monthlySpend = spending[dominantCat] || 0;
+  const rate = (rawCard.rewards && (rawCard.rewards[dominantCat] || rawCard.rewards.default)) || 1;
+  const fee  = rawCard.annualFee || 0;
+  const monthsToOffset = fee > 0
+    ? Math.ceil(fee / (topCard.estimates.annual + fee) * 12)
+    : 0;
+
+  const feeNote = fee > 0
+    ? ` Annual fee of $${fee} is offset after month ${monthsToOffset}.`
+    : ' No annual fee.';
+
+  return (
+    `${topCard.name} ranked #1 because your $${monthlySpend}/month ${dominantCat} spend ` +
+    `triggers a ${rate}x reward rate.` +
+    feeNote
+  );
+}
+
 // Check if a user is eligible for a specific card
 function isEligible(card, profile) {
   // If card has no min score, everyone is eligible
@@ -74,8 +162,18 @@ function estimateRewardsForCard(card, spending) {
 
 // Main function that recommends cards to a user
 function recommendCards(cards, profile, spending, ownedCards = []) {
-  // First, filter out ineligible cards
-  const eligible = cards.filter((c) => isEligible(c, profile));
+  // Separate eligible from ineligible, collecting a reason for each exclusion
+  const eligible = [];
+  const excludedCards = [];
+
+  for (const card of cards) {
+    const reason = getExclusionReason(card, profile);
+    if (reason === null) {
+      eligible.push(card);
+    } else {
+      excludedCards.push({ name: card.name, reason });
+    }
+  }
 
   // Track which cards the user already owns
   const ownedNames = new Set();
@@ -288,7 +386,29 @@ function recommendCards(cards, profile, spending, ownedCards = []) {
     .sort((a, b) => b.estimates.annual - a.estimates.annual);
   const bestOverall = sorted.slice(0, 3);
 
-  return { scored, bestByCategory, bestOverall };
+  // Build explanation object
+  const dominantCat = getDominantCategory(spending);
+  const topCard     = bestOverall[0] || null;
+  const rawTopCard  = topCard ? cards.find((c) => c.id === topCard.id) : null;
+
+  const ecosystemBonusApplied = ecosPref !== 'Any' &&
+    eligible.some((c) =>
+      (c.ecosystem || c.issuer || '').toLowerCase().includes(ecosPref.toLowerCase())
+    );
+
+  const explanation = {
+    algo_version: ALGO_VERSION,
+    top_card_reasoning: topCard && rawTopCard
+      ? buildTopCardReasoning(topCard, rawTopCard, dominantCat, spending)
+      : 'No eligible cards found for this profile.',
+    excluded_cards: excludedCards,
+    profile_signals: {
+      dominant_category: dominantCat,
+      ecosystem_bonus_applied: ecosystemBonusApplied,
+    },
+  };
+
+  return { scored, bestByCategory, bestOverall, explanation };
 }
 
-module.exports = { isEligible, estimateRewardsForCard, recommendCards };
+module.exports = { isEligible, estimateRewardsForCard, recommendCards, getExclusionReason, ALGO_VERSION };

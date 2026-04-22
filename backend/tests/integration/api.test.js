@@ -72,6 +72,24 @@ describe('POST /api/cards/recommend — valid payload', () => {
     const res = await request(app).post('/api/cards/recommend').send(payload);
     expect(res.statusCode).toBe(200);
   });
+
+  test('response includes explanation object with required fields', async () => {
+    const res = await request(app).post('/api/cards/recommend').send(VALID_PAYLOAD);
+
+    const { explanation } = res.body;
+    expect(explanation).toBeDefined();
+    expect(typeof explanation.algo_version).toBe('string');
+    expect(typeof explanation.top_card_reasoning).toBe('string');
+    expect(Array.isArray(explanation.excluded_cards)).toBe(true);
+    expect(typeof explanation.profile_signals.dominant_category).toBe('string');
+    expect(typeof explanation.profile_signals.ecosystem_bonus_applied).toBe('boolean');
+  });
+
+  test('explanation.top_card_reasoning mentions the #1 card name', async () => {
+    const res = await request(app).post('/api/cards/recommend').send(VALID_PAYLOAD);
+    const topName = res.body.bestOverall[0].name;
+    expect(res.body.explanation.top_card_reasoning).toContain(topName);
+  });
 });
 
 // ---------------------------------------------------------------------------
